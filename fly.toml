@@ -1,0 +1,46 @@
+# fly.toml — SpotD deployment config
+# Deploy with: fly launch --no-deploy, then fly deploy
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "spotd"          # change to your unique app name
+primary_region = "sin" # Singapore — closest free region to India
+                       # Other options: bom (Mumbai, paid), sin, lax, iad
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT          = "5000"
+  FLASK_DEBUG   = "false"
+
+# Persistent volume — stores sessions + config across deploys
+# Create it once with: fly volumes create spotd_data --size 1
+[[mounts]]
+  source      = "spotd_data"
+  destination = "/app/data"
+
+[http_service]
+  internal_port        = 5000
+  force_https          = true
+  auto_stop_machines   = true   # stops when idle (saves free allowance)
+  auto_start_machines  = true   # wakes on request
+  min_machines_running = 0
+
+  # Downloads can take several minutes — raise timeouts
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 10
+    soft_limit = 5
+
+[[http_service.checks]]
+  grace_period  = "10s"
+  interval      = "30s"
+  method        = "GET"
+  path          = "/"
+  timeout       = "5s"
+
+# Shared CPU + 512MB RAM (free tier)
+# Bump to 1gb if downloads OOM: fly scale memory 1024
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "512mb"

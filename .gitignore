@@ -1,0 +1,42 @@
+# Replit installed packages (not needed, pip installs from requirements.txt)
+.pythonlibs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+.env
+
+# App data & downloads (user-specific, not source code)
+data/config.json
+data/sessions/
+downloads/
+*.zip
+gunicorn.ctl
+
+# Secrets
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

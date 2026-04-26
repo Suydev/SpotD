@@ -62,6 +62,26 @@ audio/video pulled from YouTube via yt-dlp; cover art + lyrics embedded with mut
 - `FLASK_DEBUG` (set `true` for dev mode)
 - `SPOTDL_PASSWORD` — when set, requires this access code at `/login` to use the
   app. When unset, the app is open and `/login` shows an "open instance" notice.
+- `SPOTDL_ADMIN_PASSWORD` — when set, enables the hidden operator console at
+  `/admin` (reachable by tapping the `♪ SpotDL` brand logo 7 times within 3
+  seconds). When unset, all `/admin*` routes return 404.
+
+## Hidden console (`/admin`)
+Tap the brand logo 7× in 3s → enter `SPOTDL_ADMIN_PASSWORD` → operator panel:
+- Live download queue + recent history
+- Disk + storage stats, retention/worker config snapshot
+- One-click actions: run cleanup, cancel all active, wipe history
+- Tail of last 200 server log lines (auto-refreshing every 4s)
+- Independent auth (separate `admin_authed` session flag, doesn't touch
+  the public `SPOTDL_PASSWORD` gate)
+
+## Android APK (`android/`)
+Native Kotlin wrapper. Single `MainActivity` hosting a `WebView` pointed at the
+deployed Flask URL (configured in `app/src/main/res/values/strings.xml`).
+File downloads are handed to Android's `DownloadManager` and saved to
+`/Music/SpotDL/`. Built automatically by `.github/workflows/android.yml` on
+every push that touches `android/**`. See `android/README.md` for the full
+build + sideload instructions.
 
 ## Retention
 - Default retention is **72 hours** (3 days). Configurable in Settings between

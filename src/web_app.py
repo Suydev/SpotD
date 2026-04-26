@@ -6,12 +6,15 @@ Track metadata is scraped from Spotify's public embed page; audio comes
 from YouTube via yt-dlp; covers + lyrics are embedded with mutagen.
 """
 
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 import io
 import json
+import logging
 import os
+import platform
 import re
 import secrets
 import shutil
@@ -82,9 +85,12 @@ _PUBLIC_PATHS = {'/landing', '/login', '/logout', '/healthz'}
 
 @app.before_request
 def _gate():
+    p = request.path or '/'
+    # Admin routes have their own auth (independent of SPOTDL_PASSWORD).
+    if p.startswith('/admin'):
+        return None
     if not _AUTH_ENABLED or _is_authed():
         return None
-    p = request.path or '/'
     if p in _PUBLIC_PATHS or p.startswith('/static/'):
         return None
     if p == '/':
@@ -96,7 +102,67 @@ def _gate():
 
 @app.context_processor
 def _inject_auth():
-    return {'auth_enabled': _AUTH_ENABLED, 'is_authed': _is_authed()}
+    return {
+        'auth_enabled':  _AUTH_ENABLED,
+        'is_authed':     _is_authed(),
+        'admin_enabled': _ADMIN_ENABLED,
+    }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hidden admin console — unlocked by tapping the brand logo 7 times.
+# Independent auth via SPOTDL_ADMIN_PASSWORD env var. Disabled if unset.
+# ─────────────────────────────────────────────────────────────────────────────
+_ADMIN_PASSWORD = os.environ.get('SPOTDL_ADMIN_PASSWORD', '').strip()
+_ADMIN_ENABLED  = bool(_ADMIN_PASSWORD)
+
+# Ring buffer of recent log lines, viewable from the admin console.
+_LOG_BUFFER: deque = deque(maxlen=500)
+_LOG_LOCK = threading.Lock()
+
+class _RingBufferHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record)
+            with _LOG_LOCK:
+                _LOG_BUFFER.append({
+                    'ts': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+                    'level': record.levelname,
+                    'msg': line,
+                })
+        except Exception:
+            pass
+
+def _install_log_capture() -> None:
+    h = _RingBufferHandler()
+    h.setFormatter(logging.Formatter('%(message)s'))
+    h.setLevel(logging.INFO)
+    for name in ('werkzeug', 'spotdl', ''):
+        lg = logging.getLogger(name)
+        if not any(isinstance(x, _RingBufferHandler) for x in lg.handlers):
+            lg.addHandler(h)
+        lg.setLevel(logging.INFO)
+
+_install_log_capture()
+log = logging.getLogger('spotdl')
+
+def _admin_log(msg: str, level: str = 'INFO') -> None:
+    """Manually push a line into the admin log buffer."""
+    with _LOG_LOCK:
+        _LOG_BUFFER.append({
+            'ts': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+            'level': level,
+            'msg': msg,
+        })
+
+def _is_admin() -> bool:
+    return _ADMIN_ENABLED and session.get('admin_authed') is True
+
+def _require_admin():
+    if not _ADMIN_ENABLED:
+        return ('Admin console disabled. Set SPOTDL_ADMIN_PASSWORD to enable.', 404)
+    if not _is_admin():
+        return redirect(url_for('admin_login_page', next=request.path))
+    return None
 
 app_settings = dict(DEFAULT_SETTINGS)
 
@@ -1296,8 +1362,165 @@ def qr_for_download(dl_id):
     return resp
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Hidden admin console routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login_page():
+    if not _ADMIN_ENABLED:
+        return ('Admin console disabled. Set SPOTDL_ADMIN_PASSWORD to enable.', 404)
+    nxt = request.values.get('next') or url_for('admin_console')
+    if not nxt.startswith('/admin'):
+        nxt = url_for('admin_console')
+    error = None
+    if request.method == 'POST':
+        pw = (request.form.get('password') or '').strip()
+        if pw and pw == _ADMIN_PASSWORD:
+            session['admin_authed'] = True
+            session.permanent = True
+            _admin_log(f'Admin unlocked from {request.remote_addr}', 'INFO')
+            return redirect(nxt)
+        _admin_log(f'Failed admin login from {request.remote_addr}', 'WARN')
+        error = 'Wrong code. Try again.'
+    return render_template('admin_login.html', error=error, next=nxt)
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_authed', None)
+    return redirect(url_for('landing') if _AUTH_ENABLED else url_for('index'))
+
+@app.route('/admin')
+def admin_console():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    return render_template('admin.html', settings=app_settings)
+
+def _disk_stats() -> dict:
+    try:
+        usage = shutil.disk_usage(str(DOWNLOADS_DIR))
+        return {'total': usage.total, 'used': usage.used, 'free': usage.free}
+    except Exception:
+        return {'total': 0, 'used': 0, 'free': 0}
+
+def _storage_stats() -> dict:
+    files = list(DOWNLOADS_DIR.glob('*.zip')) + list(DOWNLOADS_DIR.glob('*.mp3')) \
+            + list(DOWNLOADS_DIR.glob('*.mp4'))
+    total_bytes = sum(f.stat().st_size for f in files if f.exists())
+    return {
+        'file_count': len(files),
+        'total_bytes': total_bytes,
+        'oldest': min((f.stat().st_mtime for f in files), default=0),
+        'newest': max((f.stat().st_mtime for f in files), default=0),
+    }
+
+@app.route('/admin/api/state')
+def admin_api_state():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    with _status_lock:
+        items = list(download_status_dict.values())
+    queue = [_public_status(s) for s in items
+             if s.get('status') in ACTIVE_STATUSES]
+    history = [_public_status(s) for s in items
+               if s.get('status') not in ACTIVE_STATUSES][-50:]
+    return jsonify({
+        'system': {
+            'python':     sys.version.split()[0],
+            'platform':   platform.platform(),
+            'pid':        os.getpid(),
+            'uptime_sec': int(time.time() - _START_TIME),
+            'cwd':        str(ROOT_DIR),
+            'auth_on':    _AUTH_ENABLED,
+            'time':       datetime.utcnow().isoformat(timespec='seconds') + 'Z',
+        },
+        'disk':    _disk_stats(),
+        'storage': _storage_stats(),
+        'queue':   queue,
+        'history': history,
+        'settings': app_settings,
+        'totals': {
+            'sessions': len(items),
+            'active':   len(queue),
+        },
+    })
+
+@app.route('/admin/api/logs')
+def admin_api_logs():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    n = max(1, min(500, int(request.args.get('n', 200))))
+    with _LOG_LOCK:
+        lines = list(_LOG_BUFFER)[-n:]
+    return jsonify({'lines': lines, 'total': len(_LOG_BUFFER)})
+
+@app.route('/admin/api/cleanup', methods=['POST'])
+def admin_api_cleanup():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    removed = 0
+    cutoff = time.time() - app_settings['retention_hours'] * 3600
+    with _status_lock:
+        for dl_id, s in list(download_status_dict.items()):
+            if s.get('status') in ACTIVE_STATUSES:
+                continue
+            mtime = 0
+            zp = s.get('zip_path')
+            if zp and Path(zp).exists():
+                mtime = Path(zp).stat().st_mtime
+            if mtime and mtime < cutoff:
+                _delete_session_file(s)
+                download_status_dict.pop(dl_id, None)
+                removed += 1
+    _persist_sessions()
+    _admin_log(f'Manual cleanup removed {removed} sessions', 'INFO')
+    return jsonify({'removed': removed})
+
+@app.route('/admin/api/cancel-all', methods=['POST'])
+def admin_api_cancel_all():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    cancelled = 0
+    with _status_lock:
+        for s in download_status_dict.values():
+            if s.get('status') in ACTIVE_STATUSES:
+                s['status']  = 'cancelled'
+                s['message'] = 'Cancelled from admin console'
+                cancelled += 1
+    _persist_sessions()
+    _admin_log(f'Admin cancelled {cancelled} active downloads', 'WARN')
+    return jsonify({'cancelled': cancelled})
+
+@app.route('/admin/api/clear-history', methods=['POST'])
+def admin_api_clear_history():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    removed = 0
+    with _status_lock:
+        for dl_id, s in list(download_status_dict.items()):
+            if s.get('status') in ACTIVE_STATUSES:
+                continue
+            _delete_session_file(s)
+            download_status_dict.pop(dl_id, None)
+            removed += 1
+    _persist_sessions()
+    _admin_log(f'Admin cleared {removed} history entries', 'WARN')
+    return jsonify({'removed': removed})
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+_START_TIME = time.time()
 
 if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     port  = int(os.environ.get('PORT', 5000))
+    if _ADMIN_ENABLED:
+        log.info('Admin console enabled at /admin (7-tap logo to reveal).')
+    else:
+        log.info('Admin console disabled. Set SPOTDL_ADMIN_PASSWORD to enable.')
     app.run(host='0.0.0.0', port=port, debug=debug, threaded=True)

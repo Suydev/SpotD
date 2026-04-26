@@ -230,6 +230,29 @@
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/static/sw.js').catch(() => {});
         }
+
+        /* ── Hidden console: tap brand logo 7× within 3s to reveal ── */
+        (function () {
+            const brand = document.querySelector('.nav-brand');
+            if (!brand) return;
+            let taps = [];
+            const NEEDED = 7, WINDOW_MS = 3000;
+            brand.addEventListener('click', function (ev) {
+                const now = Date.now();
+                taps = taps.filter(t => now - t < WINDOW_MS);
+                taps.push(now);
+                if (taps.length >= NEEDED) {
+                    ev.preventDefault();
+                    taps = [];
+                    // Tiny haptic-feedback flash
+                    brand.style.transition = 'color .15s';
+                    const orig = brand.style.color;
+                    brand.style.color = '#66E0CF';
+                    setTimeout(() => brand.style.color = orig, 250);
+                    window.location.href = '/admin';
+                }
+            });
+        })();
     </script>
     {% block extra_js %}{% endblock %}
 </body>

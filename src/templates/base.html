@@ -206,6 +206,11 @@
         </a>
         <a href="/settings" class="nav-link {% if request.path == '/settings' %}active{% endif %}">⚙️ Settings</a>
         <a href="/deploy"   class="nav-link {% if request.path == '/deploy' %}active{% endif %}">🚀 Deploy</a>
+        <span style="flex:1"></span>
+        <a href="/landing" class="nav-link" title="Landing page">✨</a>
+        {% if auth_enabled %}
+          <a href="/logout"  class="nav-link" title="Sign out">⏻</a>
+        {% endif %}
     </nav>
 
     {% with messages = get_flashed_messages(with_categories=true) %}

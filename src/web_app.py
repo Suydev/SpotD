@@ -9,6 +9,7 @@ from YouTube via yt-dlp; covers + lyrics are embedded with mutagen.
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
+import io
 import json
 import os
 import re
@@ -19,11 +20,13 @@ import threading
 import time
 import zipfile
 
+import qrcode
 import requests as _req
 import yt_dlp
 from dotenv import load_dotenv
 from flask import (Flask, Response, flash, jsonify, redirect, render_template,
-                   request, send_file, url_for)
+                   request, send_file, session, url_for)
+from functools import wraps
 
 load_dotenv()
 
@@ -63,8 +66,38 @@ DEFAULT_SETTINGS = {
     'audio_quality':   'mp3-320',
     'video_quality':   '720p',
     'parallel_workers': 4,        # concurrent track downloads
-    'retention_hours': 24,        # how long completed files stay on disk
+    'retention_hours': 72,        # how long completed files stay on disk (3 days)
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional password gate (set SPOTDL_PASSWORD env var to enable)
+# ─────────────────────────────────────────────────────────────────────────────
+_AUTH_PASSWORD = os.environ.get('SPOTDL_PASSWORD', '').strip()
+_AUTH_ENABLED  = bool(_AUTH_PASSWORD)
+
+def _is_authed() -> bool:
+    return (not _AUTH_ENABLED) or session.get('authed') is True
+
+_PUBLIC_PATHS = {'/landing', '/login', '/logout', '/healthz'}
+
+@app.before_request
+def _gate():
+    if not _AUTH_ENABLED or _is_authed():
+        return None
+    p = request.path or '/'
+    if p in _PUBLIC_PATHS or p.startswith('/static/'):
+        return None
+    if p == '/':
+        return redirect(url_for('landing'))
+    # Anything else: send them to login, then bounce back.
+    if request.method == 'GET':
+        return redirect(url_for('login', next=p))
+    return ('Unauthorized', 401)
+
+@app.context_processor
+def _inject_auth():
+    return {'auth_enabled': _AUTH_ENABLED, 'is_authed': _is_authed()}
+
 app_settings = dict(DEFAULT_SETTINGS)
 
 def _read_json(path: Path, default):
@@ -105,8 +138,10 @@ _load_settings()
 download_status_dict: dict = {}
 _status_lock = threading.Lock()
 
-# Fields too big or runtime-only to persist
-_NON_PERSISTED = {'all_tracks'}
+# Fields too big to persist to disk (still returned in API responses)
+_NON_PERSISTED = {'all_tracks', 'tracks_progress'}
+# Fields hidden from API responses (e.g. internal structures)
+_NON_PUBLIC    = {'all_tracks'}
 
 def _persist_sessions():
     try:
@@ -192,6 +227,181 @@ def _cleanup_worker():
             print(f"[cleanup] worker error: {e}")
 
 threading.Thread(target=_cleanup_worker, daemon=True, name='cleanup').start()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Spotify search — anonymous web token, no credentials needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_anon_token: str | None = None
+_anon_token_exp: float = 0.0
+_token_lock = threading.Lock()
+
+_TOKEN_PROBE_URL = 'https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M'
+
+def _get_anon_token() -> str:
+    """Fetch (and cache) an anonymous web-player access token.
+
+    Spotify blocks /get_access_token from data-center IPs, but the same token
+    is embedded inside any /embed/<…> page's __NEXT_DATA__ JSON. We just
+    scrape it from there.
+    """
+    global _anon_token, _anon_token_exp
+    with _token_lock:
+        if _anon_token and time.time() < _anon_token_exp:
+            return _anon_token
+        # Try /get_access_token first (works on residential IPs)
+        try:
+            r = _req.get('https://open.spotify.com/get_access_token'
+                         '?reason=transport&productType=embed',
+                         headers=_BROWSER_HEADERS, timeout=10)
+            if r.ok and r.headers.get('content-type', '').startswith('application/json'):
+                d = r.json()
+                if d.get('accessToken'):
+                    _anon_token = d['accessToken']
+                    _anon_token_exp = (d.get('accessTokenExpirationTimestampMs', 0) / 1000.0) - 60
+                    return _anon_token
+        except Exception:
+            pass
+        # Fallback: scrape token out of an embed page
+        r = _req.get(_TOKEN_PROBE_URL, headers=_BROWSER_HEADERS, timeout=15)
+        r.raise_for_status()
+        m = re.search(r'"accessToken"\s*:\s*"([^"]+)"', r.text)
+        if not m:
+            raise RuntimeError("Could not extract Spotify access token from embed.")
+        _anon_token = m.group(1)
+        # Embed tokens last ~30 min; refresh every 20 min just in case.
+        m2 = re.search(r'"accessTokenExpirationTimestampMs"\s*:\s*(\d+)', r.text)
+        if m2:
+            _anon_token_exp = (int(m2.group(1)) / 1000.0) - 60
+        else:
+            _anon_token_exp = time.time() + 20 * 60
+        return _anon_token
+
+def _itunes_search(term: str, entity: str, limit: int) -> list:
+    """Hit iTunes Search API (free, no auth). Returns the 'results' list."""
+    try:
+        r = _req.get('https://itunes.apple.com/search',
+                     params={'term': term, 'entity': entity,
+                             'limit': limit, 'media': 'music'},
+                     timeout=12)
+        if r.ok:
+            return r.json().get('results') or []
+    except Exception as e:
+        print(f"[itunes] {e}")
+    return []
+
+def _bigger_artwork(url: str, size: int = 600) -> str:
+    """iTunes hands back 100x100 art; rewrite to a higher-res variant."""
+    if not url:
+        return ''
+    return re.sub(r'/\d+x\d+(bb)?\.', f'/{size}x{size}bb.', url)
+
+def spotify_search(query: str, types: tuple = ('track', 'playlist', 'album'),
+                   limit: int = 8) -> dict:
+    """Catalog search via iTunes (more reliable from cloud IPs than Spotify).
+
+    For 'playlist', falls back to a Spotify embed-page scrape since iTunes
+    has no playlist concept. Returns {tracks:[], albums:[], playlists:[]}.
+    """
+    out = {f'{t}s': [] for t in types}
+    q = query.strip()
+    if not q:
+        return out
+
+    # ─ Tracks ─
+    if 'track' in types:
+        for it in _itunes_search(q, 'song', limit):
+            out['tracks'].append({
+                'name':   it.get('trackName') or '',
+                'artist': it.get('artistName') or '',
+                'album':  it.get('collectionName') or '',
+                'cover':  _bigger_artwork(it.get('artworkUrl100', '')),
+                'duration_ms': it.get('trackTimeMillis', 0),
+                'kind':   'track',
+                # We don't need a Spotify URL — the downloader can resolve
+                # artist+title directly via YouTube.
+                'url':    '',
+                'id':     str(it.get('trackId', '')),
+            })
+
+    # ─ Albums ─
+    if 'album' in types:
+        for it in _itunes_search(q, 'album', limit):
+            out['albums'].append({
+                'name':   it.get('collectionName') or '',
+                'artist': it.get('artistName') or '',
+                'cover':  _bigger_artwork(it.get('artworkUrl100', '')),
+                'year':   (it.get('releaseDate') or '')[:4],
+                'tracks_count': it.get('trackCount', 0),
+                'kind':   'album',
+                'url':    '',  # downloader uses album_id below
+                'id':     str(it.get('collectionId', '')),
+            })
+
+    # ─ Playlists ─ (Spotify only — iTunes has none.)
+    if 'playlist' in types:
+        try:
+            token = _get_anon_token()
+            r = _req.get('https://api.spotify.com/v1/search',
+                         params={'q': q, 'type': 'playlist', 'limit': limit},
+                         headers={'Authorization': f'Bearer {token}',
+                                  'User-Agent': _BROWSER_HEADERS['User-Agent']},
+                         timeout=12)
+            if r.ok:
+                items = (r.json().get('playlists') or {}).get('items') or []
+                for it in items:
+                    if not it:
+                        continue
+                    imgs = it.get('images') or []
+                    cover = imgs[0].get('url', '') if imgs else ''
+                    out['playlists'].append({
+                        'name':   it.get('name', ''),
+                        'artist': (it.get('owner') or {}).get('display_name', ''),
+                        'cover':  cover,
+                        'tracks_count': (it.get('tracks') or {}).get('total', 0),
+                        'kind':   'playlist',
+                        'url':    (it.get('external_urls') or {}).get('spotify', ''),
+                        'id':     it.get('id', ''),
+                    })
+        except Exception as e:
+            print(f"[search/playlist] {e}")
+    return out
+
+def fetch_itunes_album_tracks(album_id: str) -> tuple[str, list]:
+    """Look up an iTunes album by ID and return (name, tracks) for downloading."""
+    try:
+        r = _req.get('https://itunes.apple.com/lookup',
+                     params={'id': album_id, 'entity': 'song', 'limit': 200},
+                     timeout=15)
+        r.raise_for_status()
+        results = r.json().get('results') or []
+    except Exception as e:
+        raise RuntimeError(f"iTunes lookup failed: {e}")
+    if not results:
+        raise RuntimeError("Album not found.")
+
+    album_meta  = next((x for x in results if x.get('wrapperType') == 'collection'), results[0])
+    name        = album_meta.get('collectionName') or 'Album'
+    cover       = _bigger_artwork(album_meta.get('artworkUrl100', ''))
+    year        = (album_meta.get('releaseDate') or '')[:4]
+    songs = [x for x in results if x.get('wrapperType') == 'track']
+    songs.sort(key=lambda s: (s.get('discNumber', 1), s.get('trackNumber', 0)))
+
+    tracks = []
+    for i, s in enumerate(songs, start=1):
+        tracks.append({
+            'name':         s.get('trackName', '').strip(),
+            'artist':       s.get('artistName', '').strip(),
+            'album':        name,
+            'spotify_url':  '',   # not needed
+            'track_number': s.get('trackNumber', i),
+            'cover_url':    cover,
+            'year':         year,
+            'preview_url':  s.get('previewUrl', ''),
+        })
+    if not tracks:
+        raise RuntimeError("Album has no tracks.")
+    return name, tracks
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Spotify scraper — public embed page, no credentials.
@@ -487,12 +697,22 @@ class Downloader:
             has_next = end < len(all_tracks)
             workers  = max(1, int(app_settings.get('parallel_workers', 4)))
 
+            # Build per-track progress list for the live UI grid
+            tracks_progress = [{
+                'i':      i,
+                'name':   t.get('name', ''),
+                'artist': t.get('artist', ''),
+                'cover':  t.get('cover_url', ''),
+                'status': 'pending',     # pending | downloading | done | failed
+            } for i, t in enumerate(chunk)]
+
             _update_status(dl_id, status='downloading', total=total,
                            playlist_name=playlist_name,
                            chunk_label=f"Songs {start+1}–{end} of {len(all_tracks)}",
                            has_next=has_next,
                            next_start=end if has_next else None,
                            quality=quality, chunk_size=chunk_size,
+                           tracks_progress=tracks_progress,
                            started_at=download_status_dict[dl_id].get('started_at')
                                       or datetime.now().isoformat())
 
@@ -501,25 +721,40 @@ class Downloader:
             done: list[str] = []
             done_lock = threading.Lock()
 
-            def _worker(track):
+            def _set_track(i: int, **fields):
+                with _status_lock:
+                    s = download_status_dict.get(dl_id)
+                    if not s:
+                        return
+                    tp = s.get('tracks_progress') or []
+                    if 0 <= i < len(tp):
+                        tp[i].update(fields)
+
+            def _worker(idx_track):
+                idx, track = idx_track
+                _set_track(idx, status='downloading')
                 _update_status(dl_id,
                     current_song=f"{track.get('name','')} — {track.get('artist','')}")
-                return self.download_single_track(track, str(out_dir), quality)
+                return idx, self.download_single_track(track, str(out_dir), quality)
 
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {pool.submit(_worker, t): t for t in chunk}
+                futures = {pool.submit(_worker, (i, t)): i for i, t in enumerate(chunk)}
                 for fut in as_completed(futures):
+                    idx = futures[fut]
                     path = None
                     try:
-                        path = fut.result()
+                        idx, path = fut.result()
                     except Exception as e:
                         print(f"[worker] {e}")
                     if path and os.path.exists(path):
+                        _set_track(idx, status='done')
                         with done_lock:
                             done.append(path)
                             n = len(done)
                         _update_status(dl_id, downloaded=n,
                                        progress=int((n / total) * 93))
+                    else:
+                        _set_track(idx, status='failed')
 
             if not done:
                 raise RuntimeError("No songs could be downloaded.")
@@ -565,7 +800,7 @@ def render(template, **kw):
     return render_template(template, **kw)
 
 def _public_status(s: dict) -> dict:
-    return {k: v for k, v in s.items() if k not in _NON_PERSISTED}
+    return {k: v for k, v in s.items() if k not in _NON_PUBLIC}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Routes
@@ -573,7 +808,31 @@ def _public_status(s: dict) -> dict:
 
 @app.route('/')
 def index():
+    if _AUTH_ENABLED and not _is_authed():
+        return redirect(url_for('landing'))
     return render('index.html')
+
+@app.route('/landing')
+def landing():
+    return render('landing.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    nxt = request.values.get('next') or url_for('index')
+    error = None
+    if request.method == 'POST' and _AUTH_ENABLED:
+        pw = (request.form.get('password') or '').strip()
+        if pw and pw == _AUTH_PASSWORD:
+            session['authed'] = True
+            session.permanent = True
+            return redirect(nxt)
+        error = 'Incorrect access code. Try again.'
+    return render('login.html', error=error, next=nxt)
+
+@app.route('/logout')
+def logout():
+    session.pop('authed', None)
+    return redirect(url_for('landing'))
 
 @app.route('/healthz')
 def healthz():
@@ -584,6 +843,8 @@ def healthz():
 @app.route('/start_download', methods=['POST'])
 def start_download():
     playlist_url = request.form.get('playlist_url', '').strip()
+    itunes_album_id = request.form.get('itunes_album_id', '').strip()
+    itunes_track    = request.form.get('itunes_track', '').strip()  # "Artist|Title|cover_url"
     quality      = request.form.get('audio_quality', app_settings['audio_quality'])
     try:
         max_songs  = max(1, min(int(request.form.get('max_songs',  app_settings['max_songs'])), 500))
@@ -591,11 +852,13 @@ def start_download():
     except ValueError:
         max_songs, chunk_size = app_settings['max_songs'], app_settings['chunk_size']
 
-    if not any(x in playlist_url for x in ('open.spotify.com/playlist/',
-                                           'open.spotify.com/album/',
-                                           'open.spotify.com/track/',
-                                           'spotify:playlist:', 'spotify:album:', 'spotify:track:')):
-        flash('Please enter a valid Spotify playlist, album, or track URL.', 'error')
+    has_spotify = any(x in playlist_url for x in (
+        'open.spotify.com/playlist/', 'open.spotify.com/album/',
+        'open.spotify.com/track/', 'spotify:playlist:',
+        'spotify:album:', 'spotify:track:'))
+
+    if not (has_spotify or itunes_album_id or itunes_track):
+        flash('Please enter a valid Spotify URL or pick a search result.', 'error')
         return redirect(url_for('index'))
 
     dl_id = _new_id('dl')
@@ -613,7 +876,23 @@ def start_download():
 
     def run():
         try:
-            name, tracks = fetch_playlist_tracks(playlist_url)
+            if itunes_album_id:
+                name, tracks = fetch_itunes_album_tracks(itunes_album_id)
+            elif itunes_track:
+                # Format: artist|title|cover_url|album
+                parts  = itunes_track.split('|')
+                artist = (parts[0] if len(parts) > 0 else '').strip()
+                title  = (parts[1] if len(parts) > 1 else '').strip()
+                cover  = (parts[2] if len(parts) > 2 else '').strip()
+                album  = (parts[3] if len(parts) > 3 else '').strip()
+                name   = title or 'Track'
+                tracks = [{
+                    'name': title, 'artist': artist, 'album': album,
+                    'spotify_url': '', 'track_number': 1,
+                    'cover_url': cover, 'year': '', 'preview_url': '',
+                }]
+            else:
+                name, tracks = fetch_playlist_tracks(playlist_url)
             tracks = tracks[:max_songs]
             with _status_lock:
                 download_status_dict[dl_id]['all_tracks']    = tracks
@@ -965,6 +1244,56 @@ def download_video():
 
     threading.Thread(target=run, daemon=True).start()
     return redirect(url_for('download_status', download_id=dl_id))
+
+# ── Search, stats, QR, share ─────────────────────────────────────────────────
+
+@app.route('/api/search')
+def api_search():
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'tracks': [], 'playlists': [], 'albums': []})
+    types_arg = request.args.get('types', 'track,playlist,album')
+    types = tuple(t.strip() for t in types_arg.split(',') if t.strip()
+                  in ('track', 'playlist', 'album'))
+    if not types:
+        types = ('track', 'playlist', 'album')
+    try:
+        limit = max(1, min(20, int(request.args.get('limit', 8))))
+    except ValueError:
+        limit = 8
+    return jsonify(spotify_search(q, types=types, limit=limit))
+
+@app.route('/api/stats')
+def api_stats():
+    with _status_lock:
+        items = list(download_status_dict.values())
+    completed   = [s for s in items if s.get('status') == 'completed']
+    total_size  = sum(s.get('file_size', 0) or 0 for s in completed)
+    total_songs = sum(s.get('downloaded', 0) or 0 for s in completed)
+    active      = sum(1 for s in items if s.get('status') in ACTIVE_STATUSES)
+    return jsonify({
+        'total_downloads': len(completed),
+        'total_size':      total_size,
+        'total_songs':     total_songs,
+        'active':          active,
+    })
+
+@app.route('/qr/<dl_id>')
+def qr_for_download(dl_id):
+    """Return a QR code PNG that points at this app's /download/<dl_id>."""
+    with _status_lock:
+        s = download_status_dict.get(dl_id)
+    if not s or s.get('status') != 'completed':
+        return 'Not ready', 404
+    target = request.host_url.rstrip('/') + url_for('download_file', download_id=dl_id)
+    img = qrcode.make(target, box_size=8, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    resp = send_file(buf, mimetype='image/png',
+                     download_name=f'{dl_id}_qr.png')
+    resp.headers['Cache-Control'] = 'public, max-age=3600'
+    return resp
 
 # ─────────────────────────────────────────────────────────────────────────────
 

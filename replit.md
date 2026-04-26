@@ -33,8 +33,36 @@ audio/video pulled from YouTube via yt-dlp; cover art + lyrics embedded with mut
   files no longer exist are pruned on load.
 - **Spotify scraper**: parses `__NEXT_DATA__` from `open.spotify.com/embed/<kind>/<id>`
   with a fallback to legacy script-tag JSON.
+- **Catalog search**: `/api/search` uses iTunes Search API (free, no auth, works from
+  cloud IPs) for tracks + albums; falls back to Spotify's API only for playlists.
+  Search results download via artist+title lookup on YouTube — no Spotify URL needed.
+- **Anonymous Spotify token**: scraped from `/embed/playlist/...` `__NEXT_DATA__`
+  because `/get_access_token` is blocked from data-center IPs.
+
+## API endpoints (JSON)
+- `GET  /api/search?q=…&limit=8&type=all|track|album|playlist` — catalog search
+- `GET  /api/stats` — `{active, total_downloads, total_songs, total_size}`
+- `GET  /api/status/<dl_id>` — live progress incl. `tracks_progress[]`
+- `GET  /qr/<dl_id>` — PNG QR code linking to the ZIP download
+- `POST /start_download` — accepts `playlist_url` OR `itunes_album_id` OR
+  `itunes_track="artist|title|cover|album"`
+
+## Pages
+- `/landing` — public marketing landing page (white, mint/teal accents,
+  emergent.sh-inspired, with hero, dark showcase frame, features grid, CTA strip).
+- `/login`   — split-screen sign-in (left: brand + password form, right: dark
+  showcase). Renders even when auth is disabled, showing an "open instance" badge.
+- `/`        — main app (dark theme). Redirects to `/landing` if auth is enabled
+  and the user isn't signed in.
+- `/logout`  — clears the session and bounces to `/landing`.
 
 ## Env vars (all optional)
 - `PORT` (default 5000)
 - `SESSION_SECRET` (auto-generated if missing)
 - `FLASK_DEBUG` (set `true` for dev mode)
+- `SPOTDL_PASSWORD` — when set, requires this access code at `/login` to use the
+  app. When unset, the app is open and `/login` shows an "open instance" notice.
+
+## Retention
+- Default retention is **72 hours** (3 days). Configurable in Settings between
+  1 hour and 30 days. A background sweep runs hourly.

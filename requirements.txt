@@ -1,6 +1,7 @@
 flask
 flask-sqlalchemy
 spotipy
+qrcode
 yt-dlp
 python-dotenv
 mutagen

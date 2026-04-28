@@ -60,4 +60,5 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.webkit:webkit:1.10.0")
+    implementation("org.python:jython-standalone:2.7.3")
 }

@@ -25,12 +25,12 @@
         android:supportsRtl="true"
         android:requestLegacyExternalStorage="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true"
         android:theme="@style/Theme.SpotDL">
 
         <activity
-            android:name=".MainActivity"
+            android:name="org.kivy.android.PythonActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask">
@@ -39,5 +39,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
     </application>
 </manifest>

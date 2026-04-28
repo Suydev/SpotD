@@ -1,0 +1,13 @@
+flask
+flask-sqlalchemy
+spotipy
+qrcode
+yt-dlp
+python-dotenv
+mutagen
+tqdm
+colorama
+psutil
+pillow
+requests
+gunicorn

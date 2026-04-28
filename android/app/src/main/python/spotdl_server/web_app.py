@@ -4,17 +4,16 @@ SpotDL — Spotify & YouTube Downloader (no credentials, no Premium).
 
 Track metadata is scraped from Spotify's public embed page; audio comes
 from YouTube via yt-dlp; covers + lyrics are embedded with mutagen.
+Android-compatible version.
 """
 
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from pathlib import Path
 import io
 import json
 import logging
 import os
-import platform
 import re
 import secrets
 import shutil
@@ -22,6 +21,14 @@ import sys
 import threading
 import time
 import zipfile
+
+try:
+    # Android-specific imports
+    from android.content import Context
+    from python.android import Android
+    ANDROID_AVAILABLE = True
+except ImportError:
+    ANDROID_AVAILABLE = False
 
 import qrcode
 import requests as _req
@@ -34,15 +41,51 @@ from functools import wraps
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Paths & app
+# Paths & app (Android-compatible)
 # ─────────────────────────────────────────────────────────────────────────────
 
-ROOT_DIR      = Path(__file__).resolve().parent.parent
-DATA_DIR      = ROOT_DIR / 'data'
-DOWNLOADS_DIR = ROOT_DIR / 'downloads'
+def get_android_context():
+    """Get Android Context if running on Android, otherwise return None."""
+    if ANDROID_AVAILABLE:
+        try:
+            return Android().context
+        except Exception:
+            pass
+    return None
+
+def get_app_data_dir():
+    """Get appropriate data directory for Android or fallback."""
+    ctx = get_android_context()
+    if ctx:
+        # Use app's internal data directory on Android
+        return ctx.getDir("spotdl_data", Context.MODE_PRIVATE)
+    else:
+        # Fallback for non-Android environments
+        return Path(__file__).resolve().parent.parent / 'data'
+
+def get_app_downloads_dir():
+    """Get appropriate downloads directory for Android or fallback."""
+    ctx = get_android_context()
+    if ctx:
+        # Use app's external files directory for media on Android
+        from android.os import Environment
+        external_dir = ctx.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+        if external_dir:
+            return Path(external_dir) / 'SpotDL'
+        else:
+            # Fallback to internal storage if external not available
+            return ctx.getDir("spotdl_downloads", Context.MODE_PRIVATE)
+    else:
+        # Fallback for non-Android environments
+        return Path(__file__).resolve().parent.parent / 'downloads'
+
+# Set up directories
+DATA_DIR      = get_app_data_dir()
+DOWNLOADS_DIR = get_app_downloads_dir()
 SESSIONS_FILE = DATA_DIR / 'sessions.json'
 CONFIG_FILE   = DATA_DIR / 'config.json'
 
+# Ensure directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -75,8 +118,8 @@ DEFAULT_SETTINGS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Optional password gate (set SPOTDL_PASSWORD env var to enable)
 # ─────────────────────────────────────────────────────────────────────────────
-_AUTH_PASSWORD = os.environ.get('SPOTDL_PASSWORD', 'spotdl123').strip()
-_AUTH_ENABLED  = True  # Always enable auth
+_AUTH_PASSWORD = os.environ.get('SPOTDL_PASSWORD', '').strip()
+_AUTH_ENABLED  = bool(_AUTH_PASSWORD)  # Only enable if password is set
 
 def _is_authed() -> bool:
     return (not _AUTH_ENABLED) or session.get('authed') is True
@@ -110,10 +153,10 @@ def _inject_auth():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Hidden admin console — unlocked by tapping the brand logo 7 times.
-# Independent auth via SPOTDL_ADMIN_PASSWORD env var. Disabled if unset.
+# Independent auth via SPOTDL_ADMIN_PASSWORD env var. Disabled by default for Android.
 # ─────────────────────────────────────────────────────────────────────────────
 _ADMIN_PASSWORD = os.environ.get('SPOTDL_ADMIN_PASSWORD', '').strip()
-_ADMIN_ENABLED  = bool(_ADMIN_PASSWORD)
+_ADMIN_ENABLED  = False  # Disabled by default for Android version
 
 # Ring buffer of recent log lines, viewable from the admin console.
 _LOG_BUFFER: deque = deque(maxlen=500)
@@ -1523,4 +1566,5 @@ if __name__ == '__main__':
         log.info('Admin console enabled at /admin (7-tap logo to reveal).')
     else:
         log.info('Admin console disabled. Set SPOTDL_ADMIN_PASSWORD to enable.')
-    app.run(host='0.0.0.0', port=port, debug=debug, threaded=True)
+    # Bind to localhost only for Android security
+    app.run(host='127.0.0.1', port=port, debug=debug, threaded=True)

@@ -1,0 +1,79 @@
+name: Python Package CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**'
+      - '!android/**'
+      - '!.github/workflows/android.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Miniconda
+      run: |
+        MINICONDA_INSTALLER_SCRIPT=Miniconda3-latest-Linux-x86_64.sh
+        wget https://repo.anaconda.com/miniconda/$MINICONDA_INSTALLER_SCRIPT -O $MINICONDA_INSTALLER_SCRIPT
+        bash $MINICONDA_INSTALLER_SCRIPT -b -p $HOME/miniconda
+        echo "$HOME/miniconda/bin" >> $GITHUB_PATH
+
+    - name: Initialize Conda
+      run: |
+        source $HOME/miniconda/etc/profile.d/conda.sh
+        conda init
+
+    - name: Create and Activate Environment
+      run: |
+        source $HOME/miniconda/etc/profile.d/conda.sh
+        conda create -n spotdl python=${{ matrix.python-version }} pip -y
+        conda activate spotdl
+
+    - name: Install Dependencies
+      run: |
+        source $HOME/miniconda/etc/profile.d/conda.sh
+        conda activate spotdl
+        pip install -r requirements.txt
+
+    - name: Lint with flake8
+      run: |
+        source $HOME/miniconda/etc/profile.d/conda.sh
+        conda activate spotdl
+        pip install flake8
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-length=127 --statistics
+
+    - name: Test with pytest
+      run: |
+        source $HOME/miniconda/etc/profile.d/conda.sh
+        conda activate spotdl
+        pip install pytest
+        pytest
+
+    - name: Build Package
+      run: |
+        source $HOME/miniconda/etc/profile.d/conda.sh
+        conda activate spotdl
+        pip install build
+        python -m build --sdist --wheel .
+
+    - name: Upload Distribution
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package
+        path: dist/

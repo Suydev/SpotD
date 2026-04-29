@@ -27,6 +27,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Validate Gradle Wrapper
+        run: |
+          gradle/wrapper/validate-wrapper-properties.sh
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -36,26 +40,31 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts*') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
-      - name: Make gradlew executable
+      - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      - name: Build debug + release APKs
-        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload debug APK
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: SpotDL-debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-      - name: Upload release APK
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: SpotDL-release
-          path: android/app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: Attach APKs to release (if tagged)
@@ -63,6 +72,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk

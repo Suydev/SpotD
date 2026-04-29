@@ -1,0 +1,11 @@
+name: spotdl
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - spotdl
+    - flake8
+    - pytest

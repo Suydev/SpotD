@@ -1,9 +1,9 @@
 pluginManagement {
     repositories {
+        maven { url "https://chaquo.com/maven" }
         google()
         mavenCentral()
         gradlePluginPortal()
-        maven { url "https://chaquo.com/maven" }
     }
     plugins {
         id("com.chaquo.python") version "14.0.2"
@@ -12,9 +12,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
+        maven { url "https://chaquo.com/maven" }
         google()
         mavenCentral()
-        maven { url "https://chaquo.com/maven" }
     }
 }
 

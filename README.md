@@ -26,7 +26,7 @@ Spotify's public embed page (`https://embed.spotify.com/?uri=spotify:playlist:{i
 
 ## Running
 The workflow installs dependencies from `requirements.txt` and starts the Flask server on port 5000:
-```
+```bash
 pip install -q -r requirements.txt && python3 src/web_app.py
 ```
 

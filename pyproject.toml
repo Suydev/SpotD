@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotdl"
+version = "1.0.0"
+
+[project.urls]
+Homepage = "https://github.com/Suydev/SpotD"
+
+[project.scripts]
+spotdl = "spotdl.cli:main"

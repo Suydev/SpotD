@@ -29,7 +29,7 @@ jobs:
 
       - name: Validate Gradle Wrapper
         run: |
-          gradle/wrapper/validate-wrapper-properties.sh
+          ./gradlew wrapper --gradle-version 8.5 --distribution-type all
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3

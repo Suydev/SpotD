@@ -7,6 +7,9 @@ pluginManagement {
             url = uri("https://chaquo.com/maven")
         }
     }
+    plugins {
+        id("com.chaquo.python") version "14.0.2"
+    }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)

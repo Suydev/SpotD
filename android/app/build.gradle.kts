@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.chaquo.python")
 }
 
 android {
@@ -14,6 +15,10 @@ android {
         versionCode   = 1
         versionName   = "1.0"
         resourceConfigurations += listOf("en")
+        
+        ndk {
+            version = "25.1.8937393"
+        }
     }
 
     buildTypes {
@@ -60,5 +65,5 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.webkit:webkit:1.10.0")
-    implementation("org.python:jython-standalone:2.7.3")
+    implementation("com.chaquo.python:python:14.0.2")
 }

@@ -7,6 +7,13 @@
 │   │   ├── proguard-rules.pro
 │   │   └── src
 │   ├── build.gradle.kts
+│   ├── .gitignore
+│   ├── .gradle
+│   │   ├── 4.4.1
+│   │   ├── 8.5
+│   │   ├── buildOutputCleanup
+│   │   ├── kotlin
+│   │   └── vcs-1
 │   ├── gradle
 │   │   └── wrapper
 │   ├── gradle.properties
@@ -15,16 +22,184 @@
 │   ├── local.properties
 │   ├── README.md
 │   └── settings.gradle.kts
+├── .claude
+│   ├── agents
+│   │   └── kfc
+│   ├── settings
+│   │   └── kfc-settings.json
+│   ├── settings.local.json
+│   ├── specs
+│   └── system-prompts
+│       └── spec-workflow-starter.md
 ├── cookies.txt
 ├── data
 │   └── sessions.json
 ├── docker-compose.yml
 ├── Dockerfile
 ├── downloads
+├── environment.yml
 ├── fly.toml
+├── .git
+│   ├── COMMIT_EDITMSG
+│   ├── config
+│   ├── description
+│   ├── FETCH_HEAD
+│   ├── HEAD
+│   ├── hooks
+│   │   ├── applypatch-msg.sample
+│   │   ├── commit-msg.sample
+│   │   ├── fsmonitor-watchman.sample
+│   │   ├── post-update.sample
+│   │   ├── pre-applypatch.sample
+│   │   ├── pre-commit.sample
+│   │   ├── pre-merge-commit.sample
+│   │   ├── prepare-commit-msg.sample
+│   │   ├── pre-push.sample
+│   │   ├── pre-rebase.sample
+│   │   ├── pre-receive.sample
+│   │   ├── push-to-checkout.sample
+│   │   ├── sendemail-validate.sample
+│   │   └── update.sample
+│   ├── index
+│   ├── info
+│   │   └── exclude
+│   ├── logs
+│   │   ├── HEAD
+│   │   └── refs
+│   ├── objects
+│   │   ├── 00
+│   │   ├── 06
+│   │   ├── 08
+│   │   ├── 0a
+│   │   ├── 0d
+│   │   ├── 0e
+│   │   ├── 11
+│   │   ├── 13
+│   │   ├── 14
+│   │   ├── 17
+│   │   ├── 18
+│   │   ├── 19
+│   │   ├── 1a
+│   │   ├── 1c
+│   │   ├── 1e
+│   │   ├── 1f
+│   │   ├── 20
+│   │   ├── 25
+│   │   ├── 27
+│   │   ├── 2b
+│   │   ├── 2d
+│   │   ├── 2e
+│   │   ├── 31
+│   │   ├── 33
+│   │   ├── 35
+│   │   ├── 36
+│   │   ├── 37
+│   │   ├── 3b
+│   │   ├── 3f
+│   │   ├── 41
+│   │   ├── 42
+│   │   ├── 43
+│   │   ├── 45
+│   │   ├── 47
+│   │   ├── 48
+│   │   ├── 4a
+│   │   ├── 4b
+│   │   ├── 4f
+│   │   ├── 51
+│   │   ├── 52
+│   │   ├── 54
+│   │   ├── 57
+│   │   ├── 58
+│   │   ├── 59
+│   │   ├── 5b
+│   │   ├── 5c
+│   │   ├── 5d
+│   │   ├── 63
+│   │   ├── 65
+│   │   ├── 66
+│   │   ├── 67
+│   │   ├── 68
+│   │   ├── 69
+│   │   ├── 6b
+│   │   ├── 6d
+│   │   ├── 6f
+│   │   ├── 72
+│   │   ├── 78
+│   │   ├── 7c
+│   │   ├── 7d
+│   │   ├── 84
+│   │   ├── 85
+│   │   ├── 86
+│   │   ├── 8a
+│   │   ├── 8b
+│   │   ├── 8e
+│   │   ├── 91
+│   │   ├── 97
+│   │   ├── 98
+│   │   ├── 99
+│   │   ├── 9b
+│   │   ├── 9c
+│   │   ├── 9d
+│   │   ├── 9e
+│   │   ├── a0
+│   │   ├── a1
+│   │   ├── a2
+│   │   ├── a4
+│   │   ├── a7
+│   │   ├── a9
+│   │   ├── ae
+│   │   ├── b2
+│   │   ├── b3
+│   │   ├── b7
+│   │   ├── bd
+│   │   ├── be
+│   │   ├── c0
+│   │   ├── c2
+│   │   ├── c3
+│   │   ├── c4
+│   │   ├── c8
+│   │   ├── ca
+│   │   ├── cf
+│   │   ├── d8
+│   │   ├── db
+│   │   ├── dc
+│   │   ├── df
+│   │   ├── e3
+│   │   ├── e5
+│   │   ├── e7
+│   │   ├── e9
+│   │   ├── ea
+│   │   ├── eb
+│   │   ├── ec
+│   │   ├── ed
+│   │   ├── f2
+│   │   ├── f3
+│   │   ├── f4
+│   │   ├── f6
+│   │   ├── f9
+│   │   ├── fe
+│   │   ├── info
+│   │   └── pack
+│   ├── ORIG_HEAD
+│   ├── packed-refs
+│   ├── refs
+│   │   ├── heads
+│   │   ├── remotes
+│   │   └── tags
+│   └── worktrees
+│       ├── copilot-github-actions-build-failure-check
+│       ├── copilot-worktree-2026-04-27T16-37-33
+│       ├── copilot-worktree-2026-04-27T16-37-51
+│       ├── copilot-worktree-2026-04-27T16-38-46
+│       └── copilot-worktree-2026-04-28T04-21-17
+├── .github
+│   └── workflows
+│       ├── android.yml
+│       └── python-package-conda.yml
 ├── github
 │   └── workflows
 │       └── android.yml
+├── .gitignore
 ├── gitignore
 ├── install.sh
 ├── KIVY_MIGRATION_GUIDE.md
@@ -55,6 +230,8 @@
 │   │   └── status.html
 │   └── web_app.py
 ├── structure.txt
-└── TRIGGER_BUILD.txt
+├── TRIGGER_BUILD.txt
+└── .vscode
+    └── launch.json
 
-14 directories, 44 files
+158 directories, 77 files

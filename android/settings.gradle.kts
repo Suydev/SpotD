@@ -1,6 +1,6 @@
 pluginManagement {
     repositories {
-        maven { url "https://chaquo.com/maven" }
+        maven { url = uri("https://chaquo.com/maven") }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -12,7 +12,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
-        maven { url "https://chaquo.com/maven" }
+        maven { url = uri("https://chaquo.com/maven") }
         google()
         mavenCentral()
     }

@@ -66,5 +66,5 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.webkit:webkit:1.10.0")
-    implementation("com.chaquo.python:python:14.0.2")
+    implementation("com.chaquo.python:python")
 }

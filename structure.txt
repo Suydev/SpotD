@@ -1,0 +1,60 @@
+.
+├── android
+│   ├── app
+│   │   ├── build
+│   │   ├── build.gradle.kts
+│   │   ├── build.gradle.kts.backup
+│   │   ├── proguard-rules.pro
+│   │   └── src
+│   ├── build.gradle.kts
+│   ├── gradle
+│   │   └── wrapper
+│   ├── gradle.properties
+│   ├── gradlew
+│   ├── gradlew.bat
+│   ├── local.properties
+│   ├── README.md
+│   └── settings.gradle.kts
+├── cookies.txt
+├── data
+│   └── sessions.json
+├── docker-compose.yml
+├── Dockerfile
+├── downloads
+├── fly.toml
+├── github
+│   └── workflows
+│       └── android.yml
+├── gitignore
+├── install.sh
+├── KIVY_MIGRATION_GUIDE.md
+├── LICENSE
+├── PLAN_FOR_OFFLINE_ANDROID_APK.md
+├── README.md
+├── replit.md
+├── replit.nix
+├── requirements.txt
+├── src
+│   ├── static
+│   │   ├── emergent-logo.svg
+│   │   ├── emergent-showcase.png
+│   │   ├── icon.svg
+│   │   ├── manifest.webmanifest
+│   │   └── sw.js
+│   ├── templates
+│   │   ├── admin.html
+│   │   ├── admin_login.html
+│   │   ├── base.html
+│   │   ├── browse.html
+│   │   ├── deploy.html
+│   │   ├── downloads.html
+│   │   ├── index.html
+│   │   ├── landing.html
+│   │   ├── login.html
+│   │   ├── settings.html
+│   │   └── status.html
+│   └── web_app.py
+├── structure.txt
+└── TRIGGER_BUILD.txt
+
+14 directories, 44 files

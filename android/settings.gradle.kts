@@ -6,9 +6,10 @@ pluginManagement {
         gradlePluginPortal()
     }
     plugins {
-        id("com.chaquo.python") version "17.0"
+        id("com.chaquo.python") version "17.0.0"
     }
 }
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {

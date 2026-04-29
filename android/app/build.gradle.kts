@@ -1,7 +1,7 @@
 plugins {
-    id 'com.android.application'
-    id 'kotlin-android'
-    id 'com.chaquo.python'  // Add this line
+    id("com.android.application")
+    id("kotlin-android")
+    id("com.chaquo.python") // Add this line
 }
 
 android {
@@ -59,6 +59,7 @@ android {
 }
 
 dependencies {
+    implementation("com.chaquo.python:python:15.0.1") // Use the latest version
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
